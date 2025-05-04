@@ -10,7 +10,10 @@ Dataset configurations:
 """""
 # DATASET_PATH = 'train_data/3D-UNet-main/dataset_csf_resample_400'  # Path to the dataset
 # DATASET_PATH = 'train_data/3D-UNet-main/dataset_csf_resample_resize'  # Path to the dataset
-DATASET_PATH = 'train_data/3D-UNet-main/dataset_csf_去邊_resample_400'  # Path to the dataset
+# DATASET_PATH = 'train_data/3D-UNet-main/dataset_csf_去邊_resample_400'  # Path to the dataset
+# DATASET_PATH = 'train_data/3D-UNet-main/dataset_resize'  # Path to the dataset
+# DATASET_PATH = 'train_data/3D-UNet-main/dataset_slicer_resample'  # Path to the dataset
+DATASET_PATH = 'train_data/3D-UNet-main/dataset_ROI_CSF'  # Path to the dataset
 TASK_ID = 1
 IN_CHANNELS = 1
 NUM_CLASSES = 1
@@ -27,12 +30,14 @@ Training configurations:
     :param TRAIN_CUDA -> if True, moves the model and inference onto GPU
     :param BCE_WEIGHTS -> the class weights for the Binary Cross Entropy loss
 """""
-TRAIN_VAL_TEST_SPLIT = [0.8, 0.2, 0.0]
-PATIENCE = 10 #每次訓練多少個epoch後，若val_loss沒有下降，則停止訓練
+TRAIN_VAL_TEST_SPLIT = [0.9, 0.1, 0.0]
+PATIENCE = 10#每次訓練多少個epoch後，若val_loss沒有下降，則停止訓練
 MODEL_PATH = "" #訓練好的模型權重
-MODEL_PATH_LABEL = "checkpoints/checkpoint_20250409_233437/0410_epoch7valLoss_0.769835.pth" #訓練好的模型權重
-LR = 1e-4 #初始學習率
-FACTOR = 0.5 #LR更新率
+MODEL_PATH_LABEL = "checkpoints/checkpoint_20250429_132438/0429_epoch9valLoss_0.708063.pth" #訓練好的模型權重
+LR = 1e-3 #初始學習率
+FACTOR = 0.1 #LR更新率
+ALPHA = 0.5 #loss的權重 1 BCE 0 DCIE
+CLR = 20 #學習率更新的步數
 FIRST_CHANNEL = 32
 NUMBER_WORKERS = 2
 SPLIT_SEED = 42
@@ -40,7 +45,7 @@ TRAINING_EPOCH = 1000
 TRAIN_BATCH_SIZE = 1
 VAL_BATCH_SIZE = 1
 TEST_BATCH_SIZE = 1
-# TRAIN_CUDA = True
-TRAIN_CUDA = False
-# BCE_WEIGHTS = [0.05, 0.1, 0.4, 0.12, 0.1, 0.08, 0.15, 0.18, 0.18, 0.1]
+TRAIN_CUDA = True
+# TRAIN_CUDA = False
+# BCE_WEIGHTS = [0.0001, 0.1, 0.4, 0.12, 0.1, 0.08, 0.15, 0.18, 0.18, 0.1]
 BCE_WEIGHTS = [0.004,0.996]
