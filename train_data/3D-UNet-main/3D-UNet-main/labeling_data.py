@@ -5,7 +5,7 @@ import numpy as np
 from unet3d import UNet3D  # 載入 U-Net3D 模型
 import torch.nn.functional as F
 import mat
-from config import (TRAIN_CUDA,MODEL_PATH_LABEL)
+from config import (TRAIN_CUDA,MODEL_PATH_LABEL,PREDICT_FILE)
 from scipy.ndimage import binary_erosion, binary_dilation
 
 def opening_3d(image: np.ndarray, structure: np.ndarray = None) -> np.ndarray:
@@ -31,7 +31,7 @@ def labeling_data(path=""):
         MODEL_PATH = path
     else:
         MODEL_PATH = MODEL_PATH_LABEL  # 訓練好的模型權重
-    INPUT_NII = "train_data/3D-UNet-main/dataset_去邊_覆蓋/orignal_1.nii.gz"  # 輸入 CT 影像
+    INPUT_NII = PREDICT_FILE  # 輸入 CT 影像
     path = MODEL_PATH.split("/")[-1]
     path = path.split(".")[-3]
     way = INPUT_NII.split("/")[-1]
