@@ -4,7 +4,7 @@ from scipy.ndimage import binary_erosion, binary_dilation, label
 import pydicom
 import os
 
-def threshold_mask(ct_array, lower=-50, upper=62):
+def threshold_mask(ct_array, lower=-50, upper=100):
     return np.logical_and(ct_array >= lower+1000, ct_array <= upper+1000)
 
 def spherical_structuring_element(radius_voxel):
@@ -51,8 +51,8 @@ def run_pipeline(input_path, output_ct_path, volume2):
     img = input_path
     ct_array = img.get_fdata()
     spacing = img.header.get_zooms()  
-    # Step 2: 閾值範圍 [-50, 62]
-    mask = threshold_mask(ct_array, -50, 62)
+    # Step 2: 閾值範圍 [-50, 100]
+    mask = threshold_mask(ct_array)
     # Step 3: 侵蝕
     mask = apply_morphology(mask, spacing, operation='erode')
     # Step 4: 最大島嶼（至少 1000 voxel）
@@ -66,10 +66,12 @@ def run_pipeline(input_path, output_ct_path, volume2):
 
     nib.save(extracted_nii, output_ct_path)
     print(f"✅ 儲存完成\n Extracted CT: {output_ct_path}")
+    return extracted_nii
+
 def load_dicom_series(dicom_files):
     # 讀入 DICOM slices 並排序
     slices = [pydicom.dcmread(f) for f in dicom_files]
-    slices.sort(key=lambda x: int(-1*x.InstanceNumber))  # 根據 Z 軸排序
+    slices.sort(key=lambda x: int(1*x.InstanceNumber))  # 根據 Z 軸排序
 
     # 基本資訊
     # 取得影像數據與 slice thickness
@@ -85,8 +87,9 @@ def load_dicom_series(dicom_files):
     slope = slices[0].RescaleSlope
     image_data2 = image_data * slope + intercept
 # 取得 WL / WW 參數
-    window_center = float(slices[0].WindowCenter)  
-    window_width = float(slices[0].WindowWidth)    
+    print(f"Window Center: {slices[0].WindowCenter}, Window Width: {slices[0].WindowWidth}")
+    window_center = float(slices[0].WindowCenter[0])  
+    window_width = float(slices[0].WindowWidth[0])    
     img_min = window_center - (window_width / 2)
     img_max = window_center + (window_width / 2)
 
@@ -99,11 +102,25 @@ def load_dicom_series(dicom_files):
     # 組 affine 矩陣
     spacing = np.array([pixel_spacing[0], pixel_spacing[1], slice_thickness])
     return image_data, image_data2, affine ,spacing
+
+def run_total(dir):
+    dicom_dir = dir# 輸入資料夾路徑
+    dicom_files = [os.path.join(dicom_dir, f) for f in os.listdir(dicom_dir) if f]
+    
+    volume, volume2, affine, spacing= load_dicom_series(dicom_files)
+    nii = nib.Nifti1Image(volume, affine=affine)
+    header = nii.header
+    header.set_data_dtype(np.int16)
+    header.set_zooms((spacing[0], spacing[1], spacing[2]))
+    output_ct = dir+"/original.nii.gz"# 輸出檔案名稱
+    
+    original = run_pipeline(nii, output_ct, volume2)
+    return original
 if __name__ == "__main__":
     # 請修改為你的檔案路徑
     dicom_dir = "doctor_dcm/1-000325562H"# 輸入資料夾路徑
     dicom_files = [os.path.join(dicom_dir, f) for f in os.listdir(dicom_dir) if f.startswith("CT")]
-
+    
     volume, volume2, affine, spacing= load_dicom_series(dicom_files)
     nii = nib.Nifti1Image(volume, affine=affine)
     header = nii.header
