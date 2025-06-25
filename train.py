@@ -249,7 +249,10 @@ def predict_2_5d_single_patient(model, image_paths,train=True,name=None):
     if train:
         nib.save(nib.Nifti1Image(np.array(out_img).transpose(1, 2, 0),affine=affine,header=header), f'log_2d/{DATASET.split("/")[-1]}_{now_time}_predict.nii.gz')
     else:
-        nib.save(nib.Nifti1Image(np.array(out_img).transpose(1, 2, 0),affine=affine,header=header), f'{image_paths.split("/")[0]}/{name}.nii.gz')
+        # 修復路徑問題：使用輸入檔案的目錄而不是根目錄
+        output_dir = os.path.dirname(image_paths)
+        output_path = os.path.join(output_dir, f'{name}.nii.gz')
+        nib.save(nib.Nifti1Image(np.array(out_img).transpose(1, 2, 0),affine=affine,header=header), output_path)
 def train():
      # 載入資料
     
