@@ -109,7 +109,18 @@ def process_single_patient(dataset_path: str, output_dir: Optional[str] = None, 
                 else:
                     raise FileNotFoundError(f"找不到模型檔案: {model_path}")
             
-            model.load_weights(model_path)
+            # 修復 .keras 檔案實際上是 H5 格式的問題
+            try:
+                model.load_weights(model_path)
+            except:
+                # 如果 .keras 檔案載入失敗，嘗試當作 H5 檔案載入
+                import tempfile
+                import shutil
+                temp_h5_path = tempfile.mktemp(suffix='.h5')
+                shutil.copy(model_path, temp_h5_path)
+                model.load_weights(temp_h5_path)
+                import os
+                os.unlink(temp_h5_path)
             predict_2_5d_single_patient(model, file_path, False, name=structure_name)
             
             # 記錄輸出檔案
@@ -188,9 +199,24 @@ def find_dicom_folders(parent_dir: str) -> List[str]:
             # 檢查是否包含 .dcm 檔案或 DICOM 檔案
             has_dicom = False
             for file in item.iterdir():
-                if file.suffix.lower() in ['.dcm', '.dicom'] or 'dicom' in file.name.lower():
-                    has_dicom = True
-                    break
+                if file.is_file():
+                    # 檢查副檔名
+                    if file.suffix.lower() in ['.dcm', '.dicom'] or 'dicom' in file.name.lower():
+                        has_dicom = True
+                        break
+                    # 檢查是否為沒有副檔名的 DICOM 檔案（使用 file 命令）
+                    elif file.suffix == '':
+                        try:
+                            import subprocess
+                            result = subprocess.run(['file', str(file)], capture_output=True, text=True, timeout=2)
+                            if 'DICOM' in result.stdout:
+                                has_dicom = True
+                                break
+                        except:
+                            # 如果 file 命令失敗，檢查檔案名稱模式
+                            if file.name.startswith('IMG') or file.name.startswith('IM'):
+                                has_dicom = True
+                                break
             
             if has_dicom:
                 dicom_folders.append(str(item))
@@ -336,10 +362,10 @@ def parse_arguments():
         epilog="""
 使用範例:
   單一資料夾處理:
-    python befor_processes.py /path/to/dicom/folder
+    python befor_processes.py --paths /path/to/dicom/folder
     
   多個資料夾處理:
-    python befor_processes.py /path/to/dicom1 /path/to/dicom2 /path/to/dicom3
+    python befor_processes.py --paths /path/to/dicom1 /path/to/dicom2 /path/to/dicom3
     
   自動發現並批次處理:
     python befor_processes.py --batch /path/to/parent/folder
@@ -348,13 +374,13 @@ def parse_arguments():
     python befor_processes.py --input-list patients.txt
     
   平行處理:
-    python befor_processes.py --parallel --max-workers 4 /path/to/dicom1 /path/to/dicom2
+    python befor_processes.py --parallel --max-workers 4 --paths /path/to/dicom1 /path/to/dicom2
         """
     )
     
     # 主要輸入參數
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('paths', nargs='*', help='DICOM 資料夾路徑（支援多個）')
+    group.add_argument('--paths', nargs='+', metavar='PATH', help='DICOM 資料夾路徑（支援多個）')
     group.add_argument('--batch', metavar='DIR', help='自動發現父目錄中的 DICOM 資料夾')
     group.add_argument('--input-list', metavar='FILE', help='從檔案讀取 DICOM 資料夾路徑列表')
     

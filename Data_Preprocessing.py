@@ -70,26 +70,80 @@ def run_pipeline(input_path, output_ct_path, volume2):
 
 def load_dicom_series(dicom_files):
     # 讀入 DICOM slices 並排序
-    slices = [pydicom.dcmread(f) for f in dicom_files]
-    slices.sort(key=lambda x: int(1*x.InstanceNumber))  # 根據 Z 軸排序
+    slices = []
+    for f in dicom_files:
+        try:
+            ds = pydicom.dcmread(f)
+            slices.append(ds)
+        except:
+            try:
+                ds = pydicom.dcmread(f, force=True)
+                if not hasattr(ds.file_meta, 'TransferSyntaxUID'):
+                    from pydicom.uid import ImplicitVRLittleEndian
+                    ds.file_meta.TransferSyntaxUID = ImplicitVRLittleEndian
+                slices.append(ds)
+            except Exception as e:
+                print(f"警告：無法讀取 DICOM 檔案 {f}: {e}")
+                continue
+    
+    try:
+        slices.sort(key=lambda x: int(x.InstanceNumber))  # 根據 InstanceNumber 排序
+    except AttributeError:
+        try:
+            slices.sort(key=lambda x: float(x.ImagePositionPatient[2]))  # 根據 Z 座標排序
+        except (AttributeError, IndexError):
+            file_slice_pairs = list(zip(dicom_files, slices))
+            file_slice_pairs.sort(key=lambda x: x[0])
+            slices = [pair[1] for pair in file_slice_pairs]
 
     # 基本資訊
     # 取得影像數據與 slice thickness
     slice_thickness = slices[0].SliceThickness  # 取得 slice thickness
-    pixel_spacing = slices[0].PixelSpacing  # 取得 pixel spacing (dx, dy)
+    # 安全處理 PixelSpacing
+    pixel_spacing_raw = slices[0].PixelSpacing
+    if hasattr(pixel_spacing_raw, '__len__') and len(pixel_spacing_raw) >= 2:
+        pixel_spacing = [float(pixel_spacing_raw[0]), float(pixel_spacing_raw[1])]
+    else:
+        pixel_spacing = [float(pixel_spacing_raw), float(pixel_spacing_raw)]
    
-    # 轉換為 NumPy 陣列
+    # 轉換為 NumPy 陣列，過濾沒有像素資料的檔案
+    valid_slices = []
+    for s in slices:
+        try:
+            # 測試是否能取得 pixel_array
+            _ = s.pixel_array
+            valid_slices.append(s)
+        except Exception as e:
+            print(f"警告：跳過沒有像素資料的切片: {e}")
+            continue
+    
+    if not valid_slices:
+        raise ValueError("沒有找到有效的 DICOM 切片資料")
+        
+    slices = valid_slices
     image_data = np.stack([s.pixel_array for s in slices], axis=-1)
     # image_data = image_data.astype(np.int16)  # 轉換為 float32
     image_data = np.rot90(image_data, k=-1, axes=(0,1))  # 旋轉至正確方向  第三章旋轉
-     # 轉換 HU 值
+     # 轉換 HU 值、
     intercept = slices[0].RescaleIntercept
     slope = slices[0].RescaleSlope
     image_data2 = image_data * slope + intercept
 # 取得 WL / WW 參數
     print(f"Window Center: {slices[0].WindowCenter}, Window Width: {slices[0].WindowWidth}")
-    window_center = float(slices[0].WindowCenter[0])  
-    window_width = float(slices[0].WindowWidth[0])    
+    
+    # 安全處理 WindowCenter 和 WindowWidth
+    window_center_raw = slices[0].WindowCenter
+    window_width_raw = slices[0].WindowWidth
+    
+    if hasattr(window_center_raw, '__len__') and len(window_center_raw) > 0:
+        window_center = float(window_center_raw[0])
+    else:
+        window_center = float(window_center_raw)
+    
+    if hasattr(window_width_raw, '__len__') and len(window_width_raw) > 0:
+        window_width = float(window_width_raw[0])
+    else:
+        window_width = float(window_width_raw)    
     img_min = window_center - (window_width / 2)
     img_max = window_center + (window_width / 2)
 
