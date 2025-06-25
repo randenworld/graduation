@@ -1,2 +1,9 @@
 3D-UNet-main
 env
+results
+__pycache__
+results02
+test_result
+.DS_Store
+*.pyc
+*zip
