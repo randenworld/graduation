@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import nibabel as nib
 import gc
 from datetime import datetime
+import numpy as np
 
 # 設定日誌
 logging.basicConfig(
@@ -27,7 +28,35 @@ logger = logging.getLogger(__name__)
 # 從全腦室中去除左右腦室 利用keep_largest_island 取出三腦室
 # 再去除三腦室 取出四腦室
 
-def process_single_patient(dataset_path: str, output_dir: Optional[str] = None, skip_existing: bool = False) -> Dict[str, Union[str, bool, float]]:
+def get_model_config(use_new_models: bool = False) -> List[tuple]:
+    """
+    根據模型選擇返回模型配置
+    
+    Args:
+        use_new_models (bool): 是否使用新模型
+        
+    Returns:
+        List[tuple]: 模型路徑和結構名稱的列表
+    """
+    if use_new_models:
+        # 新模型配置：CSF用舊模型，其他用新模型
+        return [
+            ("model/model_pre/CSF.keras", "CSF"),
+            ("model/model_new/Ventricle_L.keras", "Ventricle_L"),
+            ("model/model_new/Ventricle_R.keras", "Ventricle_R"),
+            ("model/model_new/Third-ventricle.keras", "Third_Ventricle"),
+            ("model/model_new/Fourth-ventricle.keras", "Fourth_Ventricle")
+        ]
+    else:
+        # 舊模型配置：保持原有流程
+        return [
+            ("model/model_pre/CSF.keras", "CSF"),
+            ("model/model_pre/Ventricles.keras", "Ventricles"),
+            ("model/model_pre/Ventricle_L.keras", "Ventricle_L"),
+            ("model/model_pre/Ventricle_R.keras", "Ventricle_R")
+        ]
+
+def process_single_patient(dataset_path: str, output_dir: Optional[str] = None, skip_existing: bool = False, use_new_models: bool = False) -> Dict[str, Union[str, bool, float]]:
     """
     處理單一病患的 DICOM 資料，進行完整的腦部分割流程
     
@@ -35,6 +64,7 @@ def process_single_patient(dataset_path: str, output_dir: Optional[str] = None, 
         dataset_path (str): DICOM 資料夾路徑
         output_dir (str, optional): 輸出目錄，若為 None 則輸出到原始資料夾
         skip_existing (bool): 是否跳過已存在的結果檔案
+        use_new_models (bool): 是否使用新模型進行第三、四腦室預測
         
     Returns:
         Dict: 處理結果，包含成功狀態、錯誤訊息、處理時間等
@@ -88,13 +118,8 @@ def process_single_patient(dataset_path: str, output_dir: Optional[str] = None, 
         model = build_2_5d_unet_model((512, 512, 1))
         file_path = DATASET + "/original.nii.gz"
         
-        # 定義模型路徑和結構名稱
-        models_to_process = [
-            ("model/CSF.keras", "CSF"),
-            ("model/Ventricles.keras", "Ventricles"),
-            ("model/Ventricle_L.keras", "Ventricle_L"),
-            ("model/Ventricle_R.keras", "Ventricle_R")
-        ]
+        # 根據模型選擇獲取配置
+        models_to_process = get_model_config(use_new_models)
         
         # 處理每個結構
         for model_path, structure_name in models_to_process:
@@ -128,31 +153,40 @@ def process_single_patient(dataset_path: str, output_dir: Optional[str] = None, 
             if Path(output_file).exists():
                 result['output_files'].append(output_file)
         
-        # 計算第三腦室和第四腦室
-        logger.info(f"計算第三和第四腦室: {patient_id}")
-        
-        ventricles = nib.load(f'{DATASET}/Ventricles.nii.gz')
-        ventricles_data = ventricles.get_fdata()
-        
-        ventricle_L = nib.load(f'{DATASET}/Ventricle_L.nii.gz')
-        ventricle_L_data = ventricle_L.get_fdata()
-        
-        ventricle_R = nib.load(f'{DATASET}/Ventricle_R.nii.gz')
-        ventricle_R_data = ventricle_R.get_fdata()
-        
-        # 計算第三腦室
-        third_ventricle = ventricles_data - ventricle_L_data - ventricle_R_data
-        third_ventricle = keep_largest_island(third_ventricle, 100)
-        third_ventricle_path = f'{DATASET}/Third_Ventricle.nii.gz'
-        nib.save(nib.Nifti1Image(third_ventricle, ventricles.affine, ventricles.header), third_ventricle_path)
-        result['output_files'].append(third_ventricle_path)
-        
-        # 計算第四腦室
-        fourth_ventricle = ventricles_data - ventricle_L_data - ventricle_R_data - third_ventricle
-        fourth_ventricle = keep_largest_island(fourth_ventricle, 100)
-        fourth_ventricle_path = f'{DATASET}/Fourth_Ventricle.nii.gz'
-        nib.save(nib.Nifti1Image(fourth_ventricle, ventricles.affine, ventricles.header), fourth_ventricle_path)
-        result['output_files'].append(fourth_ventricle_path)
+        # 根據模型選擇決定是否需要計算第三、四腦室
+        if not use_new_models:
+            # 舊模型：需要計算第三腦室和第四腦室
+            logger.info(f"計算第三和第四腦室: {patient_id}")
+            
+            ventricles = nib.load(f'{DATASET}/Ventricles.nii.gz')
+            ventricles_data = ventricles.get_fdata()
+            
+            ventricle_L = nib.load(f'{DATASET}/Ventricle_L.nii.gz')
+            ventricle_L_data = ventricle_L.get_fdata()
+            
+            ventricle_R = nib.load(f'{DATASET}/Ventricle_R.nii.gz')
+            ventricle_R_data = ventricle_R.get_fdata()
+            
+            # 計算第三腦室
+            third_ventricle = ventricles_data - ventricle_L_data - ventricle_R_data
+            # 避免負值問題：將負值設為0
+            third_ventricle = np.maximum(third_ventricle, 0)
+            third_ventricle = keep_largest_island(third_ventricle, 100)
+            third_ventricle_path = f'{DATASET}/Third_Ventricle.nii.gz'
+            nib.save(nib.Nifti1Image(third_ventricle, ventricles.affine, ventricles.header), third_ventricle_path)
+            result['output_files'].append(third_ventricle_path)
+            
+            # 計算第四腦室
+            fourth_ventricle = ventricles_data - ventricle_L_data - ventricle_R_data - third_ventricle
+            # 避免負值問題：將負值設為0
+            fourth_ventricle = np.maximum(fourth_ventricle, 0)
+            fourth_ventricle = keep_largest_island(fourth_ventricle, 100)
+            fourth_ventricle_path = f'{DATASET}/Fourth_Ventricle.nii.gz'
+            nib.save(nib.Nifti1Image(fourth_ventricle, ventricles.affine, ventricles.header), fourth_ventricle_path)
+            result['output_files'].append(fourth_ventricle_path)
+        else:
+            # 新模型：第三、四腦室已經透過模型直接預測，無需計算
+            logger.info(f"使用新模型，第三、四腦室已直接預測: {patient_id}")
         
         result['success'] = True
         result['processing_time'] = time.time() - start_time
@@ -227,7 +261,7 @@ def find_dicom_folders(parent_dir: str) -> List[str]:
 
 def batch_process_patients(input_paths: List[str], output_dir: Optional[str] = None, 
                          parallel: bool = False, max_workers: Optional[int] = None,
-                         skip_existing: bool = False) -> List[Dict]:
+                         skip_existing: bool = False, use_new_models: bool = False) -> List[Dict]:
     """
     批次處理多個病患的 DICOM 資料
     
@@ -237,6 +271,7 @@ def batch_process_patients(input_paths: List[str], output_dir: Optional[str] = N
         parallel (bool): 是否使用平行處理
         max_workers (int, optional): 最大工作執行緒數
         skip_existing (bool): 是否跳過已存在的結果
+        use_new_models (bool): 是否使用新模型進行第三、四腦室預測
         
     Returns:
         List[Dict]: 所有病患的處理結果
@@ -253,7 +288,7 @@ def batch_process_patients(input_paths: List[str], output_dir: Optional[str] = N
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_path = {
-                executor.submit(process_single_patient, path, output_dir, skip_existing): path 
+                executor.submit(process_single_patient, path, output_dir, skip_existing, use_new_models): path 
                 for path in input_paths
             }
             
@@ -280,7 +315,7 @@ def batch_process_patients(input_paths: List[str], output_dir: Optional[str] = N
         # 序列處理
         for i, path in enumerate(input_paths, 1):
             logger.info(f"處理進度: {i}/{len(input_paths)}")
-            result = process_single_patient(path, output_dir, skip_existing)
+            result = process_single_patient(path, output_dir, skip_existing, use_new_models)
             results.append(result)
             
             if result['success']:
@@ -375,6 +410,9 @@ def parse_arguments():
     
   平行處理:
     python befor_processes.py --parallel --max-workers 4 --paths /path/to/dicom1 /path/to/dicom2
+    
+  使用新模型:
+    python befor_processes.py --use-new-models --paths /path/to/dicom/folder
         """
     )
     
@@ -396,6 +434,7 @@ def parse_arguments():
     parser.add_argument('--generate-report', action='store_true', default=True, help='生成處理報告')
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
                        default='INFO', help='日誌等級')
+    parser.add_argument('--use-new-models', action='store_true', help='使用新模型進行第三、四腦室預測')
     
     return parser.parse_args()
 
@@ -442,9 +481,9 @@ if __name__ == "__main__":
     input_paths = valid_paths
     
     # 向後相容性：如果只有一個路徑且沒有特殊參數，使用原始邏輯
-    if len(input_paths) == 1 and not any([args.output_dir, args.parallel, args.skip_existing]):
+    if len(input_paths) == 1 and not any([args.output_dir, args.parallel, args.skip_existing, args.use_new_models]):
         logger.info("使用單一病患處理模式（向後相容）")
-        result = process_single_patient(input_paths[0])
+        result = process_single_patient(input_paths[0], use_new_models=args.use_new_models)
         if result['success']:
             logger.info("處理完成")
             sys.exit(0)
@@ -461,7 +500,8 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         parallel=args.parallel,
         max_workers=args.max_workers,
-        skip_existing=args.skip_existing
+        skip_existing=args.skip_existing,
+        use_new_models=args.use_new_models
     )
     total_time = time.time() - start_time
     
